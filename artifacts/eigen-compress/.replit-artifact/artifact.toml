@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "EigenCompress"
+description = "An interactive learning app that demonstrates low-rank SVD image approximation, reconstruction metrics, and small-matrix eigenvalue and diagonalisation concepts."
+version = "1.0.0"
+id = "artifacts/eigen-compress"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19587
+
+[services.development]
+run = "pnpm --filter @workspace/eigen-compress run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/eigen-compress", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/eigen-compress/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19587"
+BASE_PATH = "/"
