@@ -108,4 +108,62 @@ describe("color image preprocessing and compression", () => {
     expect(image.data).toHaveLength(image.width * image.height);
     expect(image.originalPreviewUrl).toContain("data:image/png");
   });
+
+  it("finishes and reconstructs a wide, low-rank color pattern", () => {
+    const width = 160;
+    const height = 100;
+    const data = new Float64Array(width * height);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        data[y * width + x] =
+          x >= 60 && x < 100 && y >= 35 && y < 65
+            ? 117.34
+            : x < 80
+              ? 79.012
+              : 54.06;
+      }
+    }
+
+    const image = {
+      width,
+      height,
+      data,
+      originalPreviewUrl: "",
+      sourceName: "low-rank color pattern",
+      originalWidth: width,
+      originalHeight: height,
+      originalFileBytes: 0,
+      wasResized: false,
+    };
+    const decomposition = computeSvd(image);
+    const rankOne = decomposition.reconstruct(1);
+    const fullRank = decomposition.reconstruct(Math.min(width, height));
+
+    expect(rankOne).toHaveLength(width * height);
+    expect(fullRank).toHaveLength(width * height);
+    expect(
+      calculateMetrics(data, rankOne, width, height, 1, decomposition.singularValues).mse,
+    ).toBeGreaterThan(0);
+    expect(
+      calculateMetrics(
+        data,
+        fullRank,
+        width,
+        height,
+        Math.min(width, height),
+        decomposition.singularValues,
+      ).mse,
+    ).toBeLessThan(1e-8);
+    expect(Array.from(data)).toEqual(
+      Array.from({ length: width * height }, (_, index) => {
+        const y = Math.floor(index / width);
+        const x = index % width;
+        return x >= 60 && x < 100 && y >= 35 && y < 65
+          ? 117.34
+          : x < 80
+            ? 79.012
+            : 54.06;
+      }),
+    );
+  });
 });

@@ -1,4 +1,4 @@
-import { Matrix, SingularValueDecomposition } from "ml-matrix";
+import { SVD } from "svd-js";
 
 import type { GrayImage } from "./image";
 
@@ -27,22 +27,48 @@ export function computeSvd(image: GrayImage): SvdResult {
   const rows = Array.from({ length: height }, (_, row) =>
     Array.from(data.subarray(row * width, (row + 1) * width)),
   );
-  const decomposition = new SingularValueDecomposition(new Matrix(rows), {
-    autoTranspose: true,
-  });
-  const singularValues = decomposition.diagonal;
-  const left = decomposition.leftSingularVectors;
-  const right = decomposition.rightSingularVectors;
-  const componentCount = singularValues.length;
+  // svd-js uses a bounded QR iteration and expects rows >= columns. For a
+  // wide image, factor Aᵀ instead and swap its U/V factors back for A.
+  const transposed = height < width;
+  const matrixForSvd = transposed
+    ? Array.from({ length: width }, (_, col) =>
+        Array.from({ length: height }, (_, row) => rows[row][col]),
+      )
+    : rows;
+  const factors = SVD(matrixForSvd);
+  const componentCount = factors.q.length;
 
   if (
-    left.rows !== height ||
-    right.rows !== width ||
-    left.columns !== componentCount ||
-    right.columns !== componentCount
+    factors.u.length !== Math.max(width, height) ||
+    factors.v.length !== Math.min(width, height) ||
+    factors.u.some((row) => row.length !== componentCount) ||
+    factors.v.some((row) => row.length !== componentCount)
   ) {
     throw new Error("SVD returned factors with dimensions that do not match the image matrix.");
   }
+  if (
+    factors.q.some((value) => !Number.isFinite(value)) ||
+    factors.u.some((row) => row.some((value) => !Number.isFinite(value))) ||
+    factors.v.some((row) => row.some((value) => !Number.isFinite(value)))
+  ) {
+    throw new Error("SVD did not converge to finite factors for this image.");
+  }
+
+  // The library does not promise that singular values are sorted. Sort them
+  // and the corresponding vector columns together so rank k always keeps the
+  // k strongest components.
+  const componentOrder = factors.q
+    .map((value, index) => ({ value: Math.abs(value), index }))
+    .sort((a, b) => b.value - a.value);
+  const singularValues = componentOrder.map(({ value }) => value);
+  const leftFactors = transposed ? factors.v : factors.u;
+  const rightFactors = transposed ? factors.u : factors.v;
+  const left = componentOrder.map(({ index }) =>
+    Float64Array.from({ length: height }, (_, row) => leftFactors[row][index]),
+  );
+  const right = componentOrder.map(({ index }) =>
+    Float64Array.from({ length: width }, (_, col) => rightFactors[col][index]),
+  );
 
   return {
     width,
@@ -57,9 +83,9 @@ export function computeSvd(image: GrayImage): SvdResult {
           let value = 0;
           for (let component = 0; component < rank; component += 1) {
             value +=
-              left.get(row, component) *
+              left[component][row] *
               singularValues[component] *
-              right.get(col, component);
+              right[component][col];
           }
           reconstructed[row * width + col] = Math.max(0, Math.min(255, value));
         }

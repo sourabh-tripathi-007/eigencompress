@@ -226,6 +226,9 @@ importers:
       ml-matrix:
         specifier: ^6.15.0
         version: 6.15.0
+      svd-js:
+        specifier: ^1.1.1
+        version: 1.1.1
     devDependencies:
       '@hookform/resolvers':
         specifier: ^3.10.0
@@ -2971,6 +2974,9 @@ packages:
     resolution: {integrity: sha512-1tB5mhVo7U+ETBKNf92xT4hrQa3pm0MZ0PQvuDnWgAAGHDsfp4lPSpiS6psrSiet87wyGPh9ft6wmhOMQ0hDiw==}
     engines: {node: '>=14.16'}
 
+  svd-js@1.1.1:
+    resolution: {integrity: sha512-3Mpd08lu7HPD/aDMnHvhLBKHLdoUv+w9411ZLGjZYIR51e05CFNAY+MYMXLs7leo6jljZ8PGkoCSI1I4lF1Z4Q==}
+
   tailwind-merge@3.6.0:
     resolution: {integrity: sha512-uxL7qAVQriqRQPAyK3pj66VqskWqoZ37PW94jwOTwNfq/z9oyu1V+eqrZqtR2+fCiXdYOZe/Modt8GtvqNzu+w==}
 
@@ -5610,6 +5616,8 @@ snapshots:
   strip-final-newline@4.0.0: {}
 
   strip-json-comments@5.0.3: {}
+
+  svd-js@1.1.1: {}
 
   tailwind-merge@3.6.0: {}
 
