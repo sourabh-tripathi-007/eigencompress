@@ -10,12 +10,17 @@ import {
 } from 'recharts';
 import { analyzeMatrix } from '@/lib/eigen';
 import { createSampleImage, downloadPng, getPngSizeBytes, previewUrlFromPixels, processImageFile } from '@/lib/image';
-import { calculateMetrics } from '@/lib/metrics';
+import { calculateMetrics, getImageShapeError } from '@/lib/metrics';
 import { computeSvd } from '@/lib/svd';
 
 type GrayImage = ReturnType<typeof createSampleImage>;
 type ModuleName = 'compress' | 'eigen';
 type MatrixAnalysis = ReturnType<typeof analyzeMatrix>;
+type SvdState = {
+  source: GrayImage;
+  result: ReturnType<typeof computeSvd> | null;
+  error: string;
+};
 
 const presets = {
   'symmetric-2': { label: 'Symmetric · 2×2', matrix: [[4, 1], [1, 2]] },
@@ -38,7 +43,7 @@ const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(ma
 function App() {
   const [activeModule, setActiveModule] = useState<ModuleName>('compress');
   const [image, setImage] = useState<GrayImage>(() => createSampleImage());
-  const [svd, setSvd] = useState<ReturnType<typeof computeSvd> | null>(null);
+  const [svdState, setSvdState] = useState<SvdState | null>(null);
   const [rank, setRank] = useState(8);
   const [showDifference, setShowDifference] = useState(false);
   const [error, setError] = useState('');
@@ -52,15 +57,25 @@ function App() {
 
   useEffect(() => {
     try {
-      setSvd(computeSvd(image));
+      setSvdState({ source: image, result: computeSvd(image), error: '' });
       setRank(8);
       setError('');
-    } catch {
-      setSvd(null);
-      setError('This image could not be decomposed. Try a smaller PNG, JPG, or WebP image.');
+    } catch (cause) {
+      setSvdState({
+        source: image,
+        result: null,
+        error: cause instanceof Error
+          ? cause.message
+          : 'This image could not be decomposed. Try a smaller PNG, JPG, or WebP image.',
+      });
+      setRank(8);
     }
   }, [image]);
 
+  // Never use the previous image's decomposition during the render between
+  // setImage() and the effect that computes this image's SVD.
+  const svd = svdState?.source === image ? svdState.result : null;
+  const svdError = svdState?.source === image ? svdState.error : '';
   const maxRank = Math.max(1, Math.min(image.width, image.height, svd?.singularValues.length ?? 1));
   const safeRank = clamp(rank, 1, maxRank);
   const reconstructed = useMemo(
@@ -68,20 +83,46 @@ function App() {
     [svd, safeRank],
   );
   const originalUrl = useMemo(
-    () => previewUrlFromPixels(image.data, image.width, image.height),
-    [image],
+    () => image.originalPreviewUrl,
+    [image.originalPreviewUrl],
   );
+  const imageShapeError = reconstructed
+    ? getImageShapeError(image.data, reconstructed, image.width, image.height)
+    : null;
+  const validReconstruction = imageShapeError ? null : reconstructed;
   const reconstructionUrl = useMemo(
-    () => reconstructed ? previewUrlFromPixels(reconstructed, image.width, image.height) : '',
-    [reconstructed, image.height, image.width],
+    () => validReconstruction ? previewUrlFromPixels(validReconstruction, image.width, image.height) : '',
+    [validReconstruction, image.height, image.width],
   );
-  const metrics = useMemo(
-    () => reconstructed ? calculateMetrics(image.data, reconstructed, image.width, image.height, safeRank, svd?.singularValues) : null,
-    [image, reconstructed, safeRank, svd],
-  );
+  const metricsResult = useMemo(() => {
+    if (!validReconstruction) return { value: null, error: '' };
+    try {
+      return {
+        value: calculateMetrics(
+          image.data,
+          validReconstruction,
+          image.width,
+          image.height,
+          safeRank,
+          svd?.singularValues,
+        ),
+        error: '',
+      };
+    } catch (cause) {
+      return {
+        value: null,
+        error: cause instanceof Error
+          ? cause.message
+          : 'Metrics could not be calculated for these image arrays.',
+      };
+    }
+  }, [image, validReconstruction, safeRank, svd]);
+  const metrics = metricsResult.value;
+  const comparisonError = imageShapeError || metricsResult.error;
+  const visibleError = error || svdError;
   const exportedPngBytes = useMemo(
-    () => reconstructed ? getPngSizeBytes(reconstructed, image.width, image.height) : 0,
-    [reconstructed, image.height, image.width],
+    () => validReconstruction ? getPngSizeBytes(validReconstruction, image.width, image.height) : 0,
+    [validReconstruction, image.height, image.width],
   );
   const spectrum = useMemo(() => {
     if (!svd) return [];
@@ -238,7 +279,7 @@ function App() {
           <section className="workspace-grid fade-in" aria-label="Image compression workspace">
             <aside className="panel control-panel">
               <div className="panel-kicker"><span className="step-number">01</span> Set up the experiment</div>
-              {error && <div className="error-banner" role="alert" data-testid="status-image-error"><AlertCircle size={16} />{error}<button className="button quiet" style={{ marginLeft: 'auto', padding: 2 }} onClick={() => setError('')} aria-label="Dismiss error" data-testid="button-dismiss-error"><X size={14} /></button></div>}
+              {visibleError && <div className="error-banner" role="alert" data-testid="status-image-error"><AlertCircle size={16} />{visibleError}<button className="button quiet" style={{ marginLeft: 'auto', padding: 2 }} onClick={() => setError('')} aria-label="Dismiss error" data-testid="button-dismiss-error"><X size={14} /></button></div>}
               <div className={`upload-zone ${dragging ? 'dragover' : ''}`} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={handleDrop} data-testid="dropzone-image">
                 <div className="upload-icon">{busy ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}</div>
                 <strong>{busy ? 'Reading your image…' : 'Bring an image into the lab'}</strong>
@@ -277,12 +318,14 @@ function App() {
               <section className="panel preview-panel">
                 <div className="section-top">
                   <h2 className="section-title"><Layers3 size={16} color="#27786a" />The image, rebuilt from patterns</h2>
-                  <span className="section-sub">grayscale · {image.width} × {image.height}</span>
+                  <span className="section-sub">grayscale SVD input · {image.width} × {image.height}</span>
                 </div>
                 <div className="image-compare">
-                  {!showDifference && <ImagePreview label="Original" dimension={`${image.width} × ${image.height}`} src={originalUrl} testId="image-original" />}
-                  <ImagePreview label={showDifference ? 'Rank-k reconstruction' : 'Rank-k reconstruction'} dimension={`k = ${safeRank}`} src={reconstructionUrl} testId="image-reconstruction" />
+                  {!showDifference && <ImagePreview label="Uploaded image" dimension={`${image.width} × ${image.height}`} src={originalUrl} stamp="source preview · resized" testId="image-original" />}
+                  <ImagePreview label="Rank-k reconstruction" dimension={`k = ${safeRank}`} src={reconstructionUrl} stamp="grayscale · 8-bit view" testId="image-reconstruction" />
                 </div>
+                {comparisonError && <div className="error-banner" role="alert" data-testid="status-image-shape-error"><AlertCircle size={15} />{comparisonError}</div>}
+                {!svd && !svdError && <p className="helper-text" role="status" data-testid="status-svd-pending">Preparing the decomposition for this image…</p>}
                 <div className="slider-line">
                   <span className="section-sub">Rank k</span>
                   <input aria-label="Adjust rank k" type="range" min="1" max={maxRank} value={safeRank} onChange={(e) => setRank(Number(e.target.value))} data-testid="slider-rank-inline" />
@@ -357,7 +400,7 @@ function App() {
                   <div><div style={{ fontSize: 12, fontWeight: 700, color: '#45514e' }}>Why singular values?</div><p style={{ margin: '5px 0 0', fontSize: 11, color: '#808a84', lineHeight: 1.55 }}>An image is a matrix of pixel intensities. SVD writes it as a sum of rank-one patterns. The largest singular values carry the most squared-error energy, so keeping the first k gives the best rank-k approximation in the least-squares sense.</p></div>
                 </div>
                 <div className="button-row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
-                  <button type="button" className="button primary" onClick={() => reconstructed && downloadPng(reconstructed, image.width, image.height, 'eigencompress-rank-' + safeRank + '.png')} disabled={!reconstructed} data-testid="button-download-png"><ArrowDownToLine size={14} />Download reconstruction PNG</button>
+                  <button type="button" className="button primary" onClick={() => validReconstruction && downloadPng(validReconstruction, image.width, image.height, 'eigencompress-rank-' + safeRank + '.png')} disabled={!validReconstruction || !!comparisonError} data-testid="button-download-png"><ArrowDownToLine size={14} />Download reconstruction PNG</button>
                 </div>
               </section>
             </div>
@@ -442,12 +485,12 @@ function App() {
   );
 }
 
-function ImagePreview({ label, dimension, src, testId }: { label: string; dimension: string; src: string; testId: string }) {
+function ImagePreview({ label, dimension, src, stamp, testId }: { label: string; dimension: string; src: string; stamp: string; testId: string }) {
   return <div className="image-frame">
     <div className="image-label"><span>{label}</span><span>{dimension}</span></div>
     <div className="image-stage" data-testid={testId}>
-      {src ? <img src={src} alt={`${label} grayscale image`} /> : <div className="image-placeholder"><FileImage size={24} />Image preview appears here after decomposition.</div>}
-      {src && <div className="image-overlay">grayscale · 8-bit view</div>}
+      {src ? <img src={src} alt={`${label} preview`} /> : <div className="image-placeholder"><FileImage size={24} />Image preview appears here after decomposition.</div>}
+      {src && <div className="image-overlay">{stamp}</div>}
     </div>
   </div>;
 }

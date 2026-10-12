@@ -7,6 +7,32 @@ export interface CompressionMetrics {
   parameterReductionPercent: number;
 }
 
+export function getImageShapeError(
+  original: ArrayLike<number>,
+  reconstructed: ArrayLike<number>,
+  width: number,
+  height: number,
+): string | null {
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width < 1 ||
+    height < 1
+  ) {
+    return "The processed grayscale image has invalid dimensions.";
+  }
+
+  const expectedPixels = width * height;
+  if (original.length !== expectedPixels) {
+    return `The processed grayscale matrix is ${width} × ${height}, but its pixel data contains ${original.length} values instead of ${expectedPixels}.`;
+  }
+  if (reconstructed.length !== expectedPixels) {
+    return `The rank reconstruction is expected to be ${width} × ${height}, but contains ${reconstructed.length} values instead of ${expectedPixels}.`;
+  }
+
+  return null;
+}
+
 export function calculateMetrics(
   original: ArrayLike<number>,
   reconstructed: ArrayLike<number>,
@@ -16,17 +42,26 @@ export function calculateMetrics(
   singularValues?: number[],
 ): CompressionMetrics {
   const pixelCount = width * height;
-  if (
-    pixelCount < 1 ||
-    original.length !== pixelCount ||
-    reconstructed.length !== pixelCount
-  ) {
-    throw new Error("The original and reconstructed images must have matching dimensions.");
-  }
+  const shapeError = getImageShapeError(original, reconstructed, width, height);
+  if (shapeError) throw new Error(shapeError);
 
   let squaredError = 0;
   for (let i = 0; i < pixelCount; i += 1) {
-    const difference = original[i] - reconstructed[i];
+    const originalPixel = original[i];
+    const reconstructedPixel = reconstructed[i];
+    if (
+      !Number.isFinite(originalPixel) ||
+      !Number.isFinite(reconstructedPixel) ||
+      originalPixel < 0 ||
+      originalPixel > 255 ||
+      reconstructedPixel < 0 ||
+      reconstructedPixel > 255
+    ) {
+      throw new Error(
+        `Pixel ${i} is outside the finite 8-bit grayscale range (0–255).`,
+      );
+    }
+    const difference = originalPixel - reconstructedPixel;
     squaredError += difference * difference;
   }
   const mse = squaredError / pixelCount;

@@ -1,7 +1,10 @@
 export interface GrayImage {
   width: number;
   height: number;
+  /** Processed grayscale matrix A, in row-major order. */
   data: Float64Array;
+  /** Color preview of the uploaded image, resized to the same display dimensions. */
+  originalPreviewUrl: string;
   sourceName: string;
   originalWidth: number;
   originalHeight: number;
@@ -45,7 +48,7 @@ function drawImageToCanvas(
       0.0722 * rgba[offset + 2];
   }
 
-  return { width, height, data };
+  return { width, height, data, originalPreviewUrl: canvas.toDataURL("image/png") };
 }
 
 export async function processImageFile(
@@ -147,6 +150,7 @@ export function createSampleImage(): GrayImage {
     width,
     height,
     data,
+    originalPreviewUrl: canvas.toDataURL("image/png"),
     sourceName: "Sunset sample",
     originalWidth: width,
     originalHeight: height,
@@ -160,6 +164,16 @@ export function previewUrlFromPixels(
   width: number,
   height: number,
 ): string {
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width < 1 ||
+    height < 1 ||
+    pixels.length !== width * height
+  ) {
+    throw new Error("Image preview pixels do not match the requested dimensions.");
+  }
+
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;

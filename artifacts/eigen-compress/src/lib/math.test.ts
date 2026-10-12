@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { analyzeMatrix } from "./eigen";
-import { calculateMetrics } from "./metrics";
+import { calculateMetrics, getImageShapeError } from "./metrics";
 import { computeSvd } from "./svd";
 
 describe("SVD image reconstruction", () => {
@@ -10,6 +10,7 @@ describe("SVD image reconstruction", () => {
       width: 2,
       height: 2,
       data: new Float64Array([100, 100, 100, 100]),
+      originalPreviewUrl: "",
       sourceName: "test",
       originalWidth: 2,
       originalHeight: 2,
@@ -29,6 +30,7 @@ describe("SVD image reconstruction", () => {
       width: 2,
       height: 2,
       data: source,
+      originalPreviewUrl: "",
       sourceName: "test",
       originalWidth: 2,
       originalHeight: 2,
@@ -41,6 +43,29 @@ describe("SVD image reconstruction", () => {
     expect(fullRank[1]).toBeCloseTo(0, 8);
     expect(fullRank[2]).toBeCloseTo(0, 8);
     expect(fullRank[3]).toBeCloseTo(5, 8);
+  });
+
+  it.each([
+    { width: 3, height: 2, data: [10, 20, 30, 40, 50, 60] },
+    { width: 2, height: 3, data: [10, 20, 30, 40, 50, 60] },
+  ])("preserves a non-square image's dimensions at minimum and maximum rank", ({ width, height, data }) => {
+    const result = computeSvd({
+      width,
+      height,
+      data: new Float64Array(data),
+      originalPreviewUrl: "",
+      sourceName: "non-square test",
+      originalWidth: width,
+      originalHeight: height,
+      originalFileBytes: 6,
+      wasResized: false,
+    });
+
+    for (const rank of [1, Math.min(width, height)]) {
+      expect(result.reconstruct(rank)).toHaveLength(width * height);
+    }
+    expect(result.width).toBe(width);
+    expect(result.height).toBe(height);
   });
 });
 
@@ -67,6 +92,20 @@ describe("compression metrics", () => {
     const metrics = calculateMetrics([1, 2], [1, 2], 2, 1, 1);
     expect(metrics.mse).toBe(0);
     expect(metrics.psnr).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it("returns a helpful error instead of comparing mismatched array shapes", () => {
+    const error = getImageShapeError([0, 1, 2, 3], [0, 1, 2], 2, 2);
+    expect(error).toContain("rank reconstruction is expected to be 2 × 2");
+    expect(() => calculateMetrics([0, 1, 2, 3], [0, 1, 2], 2, 2, 1)).toThrow(
+      "rank reconstruction is expected to be 2 × 2",
+    );
+  });
+
+  it("rejects values outside the 8-bit grayscale range", () => {
+    expect(() => calculateMetrics([0, 256], [0, 10], 2, 1, 1)).toThrow(
+      "outside the finite 8-bit grayscale range",
+    );
   });
 });
 

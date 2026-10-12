@@ -11,8 +11,17 @@ export interface SvdResult {
 
 export function computeSvd(image: GrayImage): SvdResult {
   const { width, height, data } = image;
-  if (width < 1 || height < 1 || data.length !== width * height) {
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width < 1 ||
+    height < 1 ||
+    data.length !== width * height
+  ) {
     throw new Error("The image matrix is empty or has an invalid shape.");
+  }
+  if (data.some((pixel) => !Number.isFinite(pixel) || pixel < 0 || pixel > 255)) {
+    throw new Error("The processed grayscale matrix must contain finite 8-bit pixel values.");
   }
 
   const rows = Array.from({ length: height }, (_, row) =>
@@ -24,6 +33,16 @@ export function computeSvd(image: GrayImage): SvdResult {
   const singularValues = decomposition.diagonal;
   const left = decomposition.leftSingularVectors;
   const right = decomposition.rightSingularVectors;
+  const componentCount = singularValues.length;
+
+  if (
+    left.rows !== height ||
+    right.rows !== width ||
+    left.columns !== componentCount ||
+    right.columns !== componentCount
+  ) {
+    throw new Error("SVD returned factors with dimensions that do not match the image matrix.");
+  }
 
   return {
     width,
@@ -46,6 +65,9 @@ export function computeSvd(image: GrayImage): SvdResult {
         }
       }
 
+      if (reconstructed.length !== height * width) {
+        throw new Error("SVD reconstruction did not preserve the processed image dimensions.");
+      }
       return reconstructed;
     },
   };
